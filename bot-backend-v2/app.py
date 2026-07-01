@@ -1,5 +1,5 @@
 # ==============================================
-# BOT BACKEND - SECRET LOGIC (Hidden on Render)
+# BOT BACKEND - RECEIVES FILTERS FROM CLIENT
 # ==============================================
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -7,125 +7,96 @@ import json
 import time
 
 app = Flask(__name__)
-CORS(app)  # Allows your extension to talk to this server
+CORS(app)
 
 # ==============================================
-# YOUR SECRET LOGIC (100% HIDDEN FROM USERS)
-# ==============================================
-
-# 1. BLACKLIST - Words to block (you can edit this anytime!)
-BLACKLIST = [
-    "test",
-    "sample", 
-    "draft",
-    "training",
-    "demo"
-]
-
-# 2. PAY FILTERS ($)
-MIN_PAY = 0.1   # Minimum pay per minute
-MAX_PAY = 1.0   # Maximum pay per minute
-
-# 3. LENGTH FILTERS (minutes)
-MIN_LENGTH = 0   # Minimum audio length
-MAX_LENGTH = 60  # Maximum audio length
-
-# 4. UNCLAIMED FILTERS
-MIN_UNCLAIMED = 0   # Minimum unclaimed count
-MAX_UNCLAIMED = 10  # Maximum unclaimed count
-
-# 5. SPEAKER FILTERS
-MIN_SPEAKERS = 0   # Minimum speaker count
-MAX_SPEAKERS = 10  # Maximum speaker count
-
-# 6. FORMAT FILTERS
-ALLOWED_FORMATS = [
-    "Identification by Video",
-    "Identification by Audio",
-    "Blank"
-]
-
-# 7. ACTIVE USERS (Subscription management)
-# Add your queue_id here to give yourself access!
-ACTIVE_USERS = [
-    "1234567890abcdef12345678",  # ← REPLACE THIS with your actual queue_id!
-]
-
-# ==============================================
-# API ENDPOINT 1: Validate a task
+# API ENDPOINT: Validate a task with client's filters
 # ==============================================
 @app.route('/validate', methods=['POST'])
 def validate_task():
     """
-    This is the MOST IMPORTANT function.
-    It receives a task from the client and decides:
-    - YES → claim it
-    - NO → skip it
+    Receives task data AND the client's filters.
+    Runs the comparison and returns "claim" or "skip".
     """
     try:
-        # Step 1: Get the task data from the client
         data = request.get_json()
         
-        # Step 2: Extract all the task details
-        unit_id = data.get('unitId', '')
-        pay = float(data.get('pay', 0))
-        length = float(data.get('length', 0))
-        unclaimed = int(data.get('unclaimed', 0))
-        speakers = int(data.get('speakers', 0))
-        format_str = data.get('format', '')
+        # Extract task data
+        task = data.get('task', {})
+        unit_id = task.get('unitId', '')
+        pay = float(task.get('pay', 0))
+        length = float(task.get('length', 0))
+        unclaimed = int(task.get('unclaimed', 0))
+        speakers = int(task.get('speakers', 0))
+        format_str = task.get('format', '')
+        
+        # Extract client's filters
+        filters = data.get('filters', {})
         
         print(f"🔍 Validating: {unit_id}")
-        print(f"   Pay: ${pay}, Length: {length}min, Unclaimed: {unclaimed}")
+        print(f"   Client filters: {filters}")
         
         # ==========================================
-        # STEP 3: RUN ALL FILTERS (SECRET LOGIC)
+        # RUN FILTERS (Using client's values)
         # ==========================================
         
-        # Filter 1: Blacklist check
-        for word in BLACKLIST:
+        # 1. Blacklist (client's own blacklist)
+        blacklist = filters.get('blacklist', [])
+        for word in blacklist:
             if word.lower() in unit_id.lower():
                 return jsonify({
                     'valid': False,
                     'reason': f'Blacklisted word: "{word}"'
                 })
         
-        # Filter 2: Pay check
-        if pay < MIN_PAY or pay > MAX_PAY:
+        # 2. Pay filters (client's own range)
+        min_pay = filters.get('minPay', 0)
+        max_pay = filters.get('maxPay', 999999)
+        if pay < min_pay or pay > max_pay:
             return jsonify({
                 'valid': False,
-                'reason': f'Pay ${pay} outside range (${MIN_PAY}-${MAX_PAY})'
+                'reason': f'Pay ${pay} outside range (${min_pay}-${max_pay})'
             })
         
-        # Filter 3: Length check
-        if length < MIN_LENGTH or length > MAX_LENGTH:
+        # 3. Length filters (client's own range)
+        min_length = filters.get('minLength', 0)
+        max_length = filters.get('maxLength', 999999)
+        if length < min_length or length > max_length:
             return jsonify({
                 'valid': False,
-                'reason': f'Length {length}min outside range ({MIN_LENGTH}-{MAX_LENGTH})'
+                'reason': f'Length {length}min outside range ({min_length}-{max_length})'
             })
         
-        # Filter 4: Unclaimed check
-        if unclaimed < MIN_UNCLAIMED or unclaimed > MAX_UNCLAIMED:
+        # 4. Unclaimed filters (client's own range)
+        min_unclaimed = filters.get('minUnclaimed', 0)
+        max_unclaimed = filters.get('maxUnclaimed', 999999)
+        if unclaimed < min_unclaimed or unclaimed > max_unclaimed:
             return jsonify({
                 'valid': False,
-                'reason': f'Unclaimed {unclaimed} outside range ({MIN_UNCLAIMED}-{MAX_UNCLAIMED})'
+                'reason': f'Unclaimed {unclaimed} outside range ({min_unclaimed}-{max_unclaimed})'
             })
         
-        # Filter 5: Speaker check
-        if speakers < MIN_SPEAKERS or speakers > MAX_SPEAKERS:
-            return jsonify({
-                'valid': False,
-                'reason': f'Speakers {speakers} outside range ({MIN_SPEAKERS}-{MAX_SPEAKERS})'
-            })
+        # 5. Speaker filters (client's own range)
+        ignore_speakers = filters.get('ignoreSpeakers', False)
+        if not ignore_speakers:
+            min_speakers = filters.get('minSpeakers', 0)
+            max_speakers = filters.get('maxSpeakers', 999999)
+            if speakers < min_speakers or speakers > max_speakers:
+                return jsonify({
+                    'valid': False,
+                    'reason': f'Speakers {speakers} outside range ({min_speakers}-{max_speakers})'
+                })
         
-        # Filter 6: Format check
-        if format_str and format_str not in ALLOWED_FORMATS:
+        # 6. Format filters (client's own allowed formats)
+        allowed_formats = filters.get('formats', [])
+        if allowed_formats and format_str not in allowed_formats:
             return jsonify({
                 'valid': False,
                 'reason': f'Format "{format_str}" not allowed'
             })
         
         # ==========================================
-        # STEP 4: ALL FILTERS PASSED → CLAIM IT!
+        # ALL FILTERS PASSED → CLAIM IT!
         # ==========================================
         print(f"✅ {unit_id} PASSED all filters!")
         return jsonify({
@@ -141,30 +112,7 @@ def validate_task():
         }), 500
 
 # ==============================================
-# API ENDPOINT 2: Check subscription
-# ==============================================
-@app.route('/check', methods=['GET'])
-def check_subscription():
-    """
-    This checks if a user has an active subscription.
-    """
-    queue_id = request.args.get('queue_id', '')
-    
-    if queue_id in ACTIVE_USERS:
-        return jsonify({
-            'valid': True,
-            'timestamp': int(time.time() * 1000),
-            'signature': 'your_hmac_signature_here'
-        })
-    else:
-        return jsonify({
-            'valid': False,
-            'timestamp': int(time.time() * 1000),
-            'signature': 'your_hmac_signature_here'
-        })
-
-# ==============================================
-# HEALTH CHECK (Render needs this)
+# HEALTH CHECK
 # ==============================================
 @app.route('/', methods=['GET'])
 def health_check():
@@ -173,8 +121,5 @@ def health_check():
         'message': 'Bot backend is running!'
     })
 
-# ==============================================
-# START THE SERVER
-# ==============================================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
